@@ -1,6 +1,6 @@
 {
     "gcp": {
-        "project_id": "YOUR_GCP_PROJECT_ID",
+        "project_id": "523949360823",
         "pubsub_topic": "mqtt-messages",
         "use_pubsub": true
     },

@@ -3,14 +3,90 @@
 #include <memory>
 #include <thread>
 #include <chrono>
+#include <condition_variable>
+#include <csignal>
+#include <mutex>
+#include <queue>
 #include <MQTTAsync.h>
 #include "mqtt_callback.h"
 #include "gcp_config.h"
 #include "pubsub_publisher.h"
 
+struct QueuedMqttMessage {
+    std::string topic;
+    std::string payload;
+};
+
+class PublishQueue {
+public:
+    void push(QueuedMqttMessage message) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (closed_) {
+                return;
+            }
+            queue_.push(std::move(message));
+        }
+        condition_.notify_one();
+    }
+
+    bool wait_pop(QueuedMqttMessage& message) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, [this] {
+            return closed_ || !queue_.empty();
+        });
+
+        if (queue_.empty()) {
+            return false;
+        }
+
+        message = std::move(queue_.front());
+        queue_.pop();
+        return true;
+    }
+
+    void close() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            closed_ = true;
+        }
+        condition_.notify_all();
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable condition_;
+    std::queue<QueuedMqttMessage> queue_;
+    bool closed_ = false;
+};
+
 // Global objects
 GcpConfig g_config;
 std::unique_ptr<PubSubPublisher> g_publisher;
+PublishQueue g_publish_queue;
+volatile std::sig_atomic_t g_shutdown_requested = 0;
+
+void handle_shutdown_signal(int signal) {
+    (void)signal;
+    g_shutdown_requested = 1;
+}
+
+void pubsub_worker() {
+    std::cout << "[PubSubWorker] Publisher worker started" << std::endl;
+
+    QueuedMqttMessage message;
+    while (g_publish_queue.wait_pop(message)) {
+        if (!g_publisher || !g_config.get_use_pubsub()) {
+            continue;
+        }
+
+        if (!g_publisher->publish_message(message.topic, message.payload)) {
+            std::cerr << "[PubSubWorker] Failed to publish queued message" << std::endl;
+        }
+    }
+
+    std::cout << "[PubSubWorker] Publisher worker stopped" << std::endl;
+}
 
 /**
  * Custom message handler to process incoming MQTT messages
@@ -20,11 +96,9 @@ void handle_mqtt_message(const std::string& topic, const std::string& payload) {
     std::cout << "[APP] Processing message from topic: " << topic << std::endl;
     std::cout << "[APP] Payload length: " << payload.length() << " bytes" << std::endl;
     
-    // Forward to Google Cloud Pub/Sub if enabled
     if (g_config.get_use_pubsub() && g_publisher) {
-        if (!g_publisher->publish_message(topic, payload)) {
-            std::cerr << "[APP] Failed to publish message to Pub/Sub" << std::endl;
-        }
+        g_publish_queue.push({topic, payload});
+        std::cout << "[APP] Message queued for Pub/Sub publishing" << std::endl;
     }
 }
 
@@ -33,6 +107,8 @@ int main() {
         std::cout << "========================================" << std::endl;
         std::cout << "MQTT to Google Cloud Pub/Sub Bridge" << std::endl;
         std::cout << "========================================" << std::endl;
+        std::signal(SIGINT, handle_shutdown_signal);
+        std::signal(SIGTERM, handle_shutdown_signal);
 
         // Step 1: Load configuration
         std::cout << "\n[INIT] Loading configuration..." << std::endl;
@@ -152,6 +228,11 @@ int main() {
 
         std::cout << "[INIT] Subscription confirmed!" << std::endl;
 
+        std::thread publisher_thread;
+        if (g_config.get_use_pubsub() && g_publisher) {
+            publisher_thread = std::thread(pubsub_worker);
+        }
+
         // Step 9: Keep the application running
         std::cout << "\n[RUNTIME] ========================================" << std::endl;
         std::cout << "[RUNTIME] MQTT to Pub/Sub Bridge is running" << std::endl;
@@ -159,7 +240,7 @@ int main() {
         std::cout << "[RUNTIME] ========================================\n" << std::endl;
 
         // Simulate application runtime
-        while (true) {
+        while (!g_shutdown_requested) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             
             // Check if client is still connected
@@ -168,7 +249,12 @@ int main() {
             }
         }
 
-        // Cleanup (won't reach here without signal)
+        std::cout << "[APP] Shutting down..." << std::endl;
+        g_publish_queue.close();
+        if (publisher_thread.joinable()) {
+            publisher_thread.join();
+        }
+
         MQTTAsync_disconnect(ctx.client, NULL);
         MQTTAsync_destroy(&ctx.client);
 
