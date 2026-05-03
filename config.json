@@ -1,7 +1,7 @@
 {
     "gcp": {
         "project_id": "523949360823",
-        "pubsub_topic": "mqtt-messages",
+        "pubsub_topic": "mqtt-pubsub-bridge",
         "use_pubsub": true
     },
     "mqtt": {

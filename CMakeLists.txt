@@ -13,6 +13,19 @@ find_package(google_cloud_cpp_pubsub CONFIG REQUIRED)
 # 2. Create the executable
 add_executable(MqttToPubSubBridge main.cpp mqtt_callback.h)
 
+set(APP_CONFIG_FILE "${CMAKE_SOURCE_DIR}/../config.json")
+if (NOT EXISTS "${APP_CONFIG_FILE}")
+    set(APP_CONFIG_FILE "${CMAKE_SOURCE_DIR}/config.json")
+endif()
+
+add_custom_target(CopyRuntimeConfig ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        ${CMAKE_BINARY_DIR}/$<CONFIG>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${APP_CONFIG_FILE}
+        ${CMAKE_BINARY_DIR}/$<CONFIG>/config.json
+)
+
 # Add include directories
 target_include_directories(MqttToPubSubBridge PRIVATE 
     ${CMAKE_SOURCE_DIR}
