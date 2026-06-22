@@ -8,9 +8,14 @@
 #include <mutex>
 #include <queue>
 #include <MQTTAsync.h>
+#include <atomic>
+#include "pubsub_subscriber.h"
 #include "mqtt_callback.h"
 #include "gcp_config.h"
 #include "pubsub_publisher.h"
+
+std::atomic_bool g_command_subscriber_stop{false};
+std::unique_ptr<PubSubSubscriber> g_command_subscriber;
 
 struct QueuedMqttMessage {
     std::string topic;
@@ -87,6 +92,10 @@ void pubsub_worker() {
 
     std::cout << "[PubSubWorker] Publisher worker stopped" << std::endl;
 }
+
+bool publish_command_to_mqtt(MqttContext& ctx, const std::string& payload) {
+    return publish_mqtt_message(ctx, g_config.get_mqtt_command_topic(), payload, g_config.get_mqtt_qos());
+};
 
 /**
  * Custom message handler to process incoming MQTT messages
@@ -233,6 +242,19 @@ int main() {
             publisher_thread = std::thread(pubsub_worker);
         }
 
+        std::thread command_subscriber_thread;
+        std::cout << "[INIT] Pub/Sub command bridge: " << (g_config.get_use_pubsub_commands() ? "enabled" : "disabled") << std::endl;
+        // Step 8.5: Start Pub/Sub command subscriber if enabled
+        if (g_config.get_use_pubsub_commands()) 
+            {
+                g_command_subscriber = std::make_unique<PubSubSubscriber>(g_config.get_gcp_project_id(), g_config.get_pubsub_command_subscription_id()); // Initialize command subscriber with project ID and subscription ID from config
+                command_subscriber_thread = std::thread([&ctx]() {g_command_subscriber->run([&ctx](const std::string& payload) {return publish_command_to_mqtt(ctx, payload);}, g_command_subscriber_stop);}); // Start command subscriber thread with lambda that calls publish_command_to_mqtt
+            }
+            else 
+            {
+                std::cout << "[INIT] Pub/Sub command bridge is disabled by config" << std::endl;
+            }
+
         // Step 9: Keep the application running
         std::cout << "\n[RUNTIME] ========================================" << std::endl;
         std::cout << "[RUNTIME] MQTT to Pub/Sub Bridge is running" << std::endl;
@@ -255,6 +277,10 @@ int main() {
             publisher_thread.join();
         }
 
+        g_command_subscriber_stop = true;
+
+        if (command_subscriber_thread.joinable()) { command_subscriber_thread.join(); }
+        
         MQTTAsync_disconnect(ctx.client, NULL);
         MQTTAsync_destroy(&ctx.client);
 

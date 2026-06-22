@@ -111,4 +111,29 @@ inline void on_subscribe_failure(void* context, MQTTAsync_failureData* response)
               << (response ? response->code : -1) << std::endl;
 }
 
+inline bool publish_mqtt_message(MqttContext& ctx, const std::string& topic, const std::string& payload, int qos) {
+    if (!ctx.client || !ctx.connected.load()) {
+        std::cerr << "[MQTT] Cannot publish command, client not connected" << std::endl;
+        return false;
+    }
+
+    MQTTAsync_message message = MQTTAsync_message_initializer;
+    message.payload = const_cast<char*>(payload.c_str());
+    message.payloadlen = static_cast<int>(payload.size());
+    message.qos = qos;
+    message.retained = 0;
+
+    MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+
+    int rc = MQTTAsync_sendMessage(ctx.client, topic.c_str(), &message, &opts);
+
+    if (rc != MQTTASYNC_SUCCESS) {
+        std::cerr << "[MQTT] Command Publish failed with code: " << rc << std::endl;
+        return false; 
+    }
+
+    std::cout << "[MQTT] Command published to topic: " << topic << std::endl;
+    return true;
+}
+
 #endif // MQTT_CALLBACK_H

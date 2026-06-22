@@ -19,8 +19,11 @@ private:
     std::string pubsub_topic_id_;
     std::string mqtt_broker_;
     std::string mqtt_topic_;
+    std::string mqtt_command_topic_;
+    std::string pubsub_command_subscription_id_;
     int mqtt_qos_ = 1;
     bool use_pubsub_ = true;
+    bool use_pubsub_commands_ = false;
 
 public:
     /**
@@ -53,6 +56,12 @@ public:
                 if (gcp_config.contains("use_pubsub")) {
                     use_pubsub_ = gcp_config["use_pubsub"].get<bool>();
                 }
+                if (gcp_config.contains("pubsub_command_subscription")) {
+                    pubsub_command_subscription_id_ = gcp_config["pubsub_command_subscription"].get<std::string>();
+                }
+                if (gcp_config.contains("use_pubsub_commands")) {
+                    use_pubsub_commands_ = gcp_config["use_pubsub_commands"].get<bool>();
+                }
             }
 
             // Load MQTT settings
@@ -66,6 +75,9 @@ public:
                 }
                 if (mqtt_config.contains("qos")) {
                     mqtt_qos_ = mqtt_config["qos"].get<int>();
+                }
+                if (mqtt_config.contains("command_topic")) {
+                    mqtt_command_topic_ = mqtt_config["command_topic"].get<std::string>();
                 }
             }
 
@@ -118,8 +130,11 @@ public:
     std::string get_pubsub_topic_id() const { return pubsub_topic_id_; }
     std::string get_mqtt_broker() const { return mqtt_broker_; }
     std::string get_mqtt_topic() const { return mqtt_topic_; }
+    std::string get_pubsub_command_subscription_id() const { return pubsub_command_subscription_id_; }
+    std::string get_mqtt_command_topic() const { return mqtt_command_topic_; }
     int get_mqtt_qos() const { return mqtt_qos_; }
     bool get_use_pubsub() const { return use_pubsub_; }
+    bool get_use_pubsub_commands() const { return use_pubsub_commands_; }
 
     // Setters
     void set_gcp_project_id(const std::string& id) { gcp_project_id_ = id; }
@@ -128,6 +143,7 @@ public:
     void set_mqtt_topic(const std::string& topic) { mqtt_topic_ = topic; }
     void set_mqtt_qos(int qos) { mqtt_qos_ = qos; }
     void set_use_pubsub(bool use_it) { use_pubsub_ = use_it; }
+    void set_use_pubsub_commands(bool use_it) { use_pubsub_commands_ = use_it; }
 
     /**
      * Print configuration to console
@@ -140,6 +156,9 @@ public:
         std::cout << "  MQTT Broker: " << mqtt_broker_ << std::endl;
         std::cout << "  MQTT Topic: " << mqtt_topic_ << std::endl;
         std::cout << "  MQTT QoS: " << mqtt_qos_ << std::endl;
+        std::cout << "  Pub/Sub Command Subscription: " << pubsub_command_subscription_id_ << std::endl;
+        std::cout << "  Use Pub/Sub Commands: " << (use_pubsub_commands_ ? "Yes" : "No") << std::endl;
+        std::cout << "  MQTT Command Topic: " << mqtt_command_topic_ << std::endl;
     }
 
     /**
@@ -160,7 +179,22 @@ public:
                 return false;
             }
         }
-        
+
+        if (use_pubsub_commands_) 
+         {  if (gcp_project_id_.empty()) {
+                std::cerr << "[Config] GCP Project ID is required when using Pub/Sub Commands" << std::endl;
+                return false;
+            }
+            if (pubsub_command_subscription_id_.empty()) {
+                std::cerr << "[Config] Pub/Sub Command Subscription ID is required when using Pub/Sub Commands" << std::endl;
+                return false;
+            }
+            if (mqtt_command_topic_.empty()) {
+                std::cerr << "[Config] MQTT Command Topic is required when using Pub/Sub Commands" << std::endl;
+                return false;
+            }
+        }
+
         if (mqtt_broker_.empty()) {
             std::cerr << "[Config] MQTT Broker URL is required" << std::endl;
             return false;

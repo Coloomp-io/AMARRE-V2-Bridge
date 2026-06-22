@@ -11,20 +11,17 @@ find_package(eclipse-paho-mqtt-c CONFIG REQUIRED)
 find_package(google_cloud_cpp_pubsub CONFIG REQUIRED)
 
 # 2. Create the executable
-add_executable(MqttToPubSubBridge main.cpp mqtt_callback.h)
+add_executable(MqttToPubSubBridge main.cpp mqtt_callback.h gcp_config.h pubsub_publisher.h pubsub_subscriber.h)
 
 set(APP_CONFIG_FILE "${CMAKE_SOURCE_DIR}/../config.json")
 if (NOT EXISTS "${APP_CONFIG_FILE}")
     set(APP_CONFIG_FILE "${CMAKE_SOURCE_DIR}/config.json")
 endif()
 
-add_custom_target(CopyRuntimeConfig ALL
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        ${CMAKE_BINARY_DIR}/$<CONFIG>
+add_custom_command(TARGET MqttToPubSubBridge POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${APP_CONFIG_FILE}
-        ${CMAKE_BINARY_DIR}/$<CONFIG>/config.json
-)
+        $<TARGET_FILE_DIR:MqttToPubSubBridge>/config.json)
 
 # Add include directories
 target_include_directories(MqttToPubSubBridge PRIVATE 
