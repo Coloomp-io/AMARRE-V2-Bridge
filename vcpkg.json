@@ -1,0 +1,15 @@
+{
+  "name": "amarre-v2-bridge",
+  "version-string": "0.1.0",
+  "description": "MQTT to Google Cloud Pub/Sub bridge for AMARRE V2 deployments.",
+  "dependencies": [
+    "nlohmann-json",
+    "paho-mqtt",
+    {
+      "name": "google-cloud-cpp",
+      "features": [
+        "pubsub"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "gcp": {
+    "project_id": "YOUR_TEXTUAL_GCP_PROJECT_ID",
+    "pubsub_topic": "mqtt-pubsub-bridge",
+    "pubsub_command_subscription": "bellota-commands-sub",
+    "use_pubsub": true,
+    "use_pubsub_commands": true
+  },
+  "mqtt": {
+    "broker": "tcp://127.0.0.1:1883",
+    "topic": "devices/+/telemetry",
+    "command_topic": "devices/sensor_02/commands",
+    "username": "amarre_edge",
+    "password_env": "MQTT_PASSWORD",
+    "qos": 1
+  }
+}

@@ -1,147 +1,155 @@
-<!-- 
-This document is a copy of the README file on the Microsoft/vcpkg-docs repository.
+# AMARRE V2 MQTT / Pub/Sub Bridge
 
-To make changes modify this file instead:
-https://github.com/microsoft/vcpkg-docs/blob/main/vcpkg/readme/vcpkg-README.md
--->
+AMARRE V2 Bridge is an MQTT client application that moves messages between a local MQTT broker and Google Cloud Pub/Sub. It is not the MQTT broker.
 
-[🌐 Read in a different language](https://learn.microsoft.com/locale/?target=https%3A%2F%2Flearn.microsoft.com%2Fvcpkg%2F)
+The current `main` branch remains the Windows-oriented workflow. The Debian ARM64 deployment assets on this branch target a Revolution Pi Connect SE running Debian 12 Bookworm on `aarch64`.
 
-# vcpkg overview
+## What The Bridge Does
 
-vcpkg is a free and open-source C/C++ package manager maintained by Microsoft
-and the C++ community. 
+- MQTT telemetry to Pub/Sub: subscribes to a local MQTT telemetry topic and publishes each payload to a Pub/Sub topic.
+- Pub/Sub commands to MQTT: optionally subscribes to a Pub/Sub command subscription and republishes command payloads to an MQTT command topic.
 
-Initially launched in 2016 as a tool for assisting developers in migrating their
-projects to newer versions of Visual Studio, vcpkg has evolved into a
-cross-platform tool used by developers on Windows, macOS, and Linux. vcpkg has a
-large collection of open-source libraries and enterprise-ready features designed to
-facilitate your development process with support for any build and project
-systems. vcpkg is a C++ tool at heart and is written in C++ with scripts in
-CMake. It is designed from the ground up to address the unique pain points C/C++
-developers experience.
+Mosquitto runs separately on the RevPi through systemd. The bridge container uses host networking so `tcp://127.0.0.1:1883` reaches the host Mosquitto broker, not a loopback interface inside the container.
 
-This tool and ecosystem are constantly evolving, and we always appreciate
-contributions! Learn how to start contributing with our [packaging
-tutorial](https://learn.microsoft.com/vcpkg/get_started/get-started-adding-to-registry) and [maintainer
-guide](https://learn.microsoft.com/vcpkg/contributing/maintainer-guide).
+## Repository Layout
 
-# Get started
+- `main.cpp`, `mqtt_callback.h`, `gcp_config.h`, `pubsub_publisher.h`, `pubsub_subscriber.h`: bridge source.
+- `CMakeLists.txt`: CMake build.
+- `vcpkg.json`: manifest for nlohmann/json, Eclipse Paho MQTT C, and Google Cloud C++ Pub/Sub.
+- `config.debian-arm64.example.json`: sanitized Debian runtime configuration.
+- `Dockerfile`: multi-stage Debian build/runtime image.
+- `deploy/revpi/docker-compose.yml`: RevPi Compose deployment.
+- `deploy/revpi/amarre-bridge.env.example`: MQTT password environment-file template.
 
-First, follow one of our quick start guides.
+## Prerequisites On The RevPi
 
-Whether you're using CMake, MSBuild, or any other build system, vcpkg has you covered:
+- Debian GNU/Linux 12 Bookworm, ARM64.
+- Docker and Docker Compose plugin.
+- Mosquitto installed and running through systemd.
+- Mosquitto listening on TCP/1883.
+- Mosquitto user `amarre_edge` created with a private password.
+- `firewalld` allowing TCP/1883 only from the intended LAN, for example `192.168.0.0/24`.
+- A fresh least-privilege Google Cloud service account JSON key.
 
-* [vcpkg with CMake](https://learn.microsoft.com/vcpkg/get_started/get-started)
-* [vcpkg with MSBuild](https://learn.microsoft.com/vcpkg/get_started/get-started-msbuild)
-* [vcpkg with other build systems](https://learn.microsoft.com/vcpkg/users/buildsystems/manual-integration)
+Historical Google Cloud credentials should be treated as compromised if they were ever committed. Do not reuse old keys.
 
-You can also use any editor:
+## Google Cloud IAM
 
-* [vcpkg with Visual Studio](https://learn.microsoft.com/vcpkg/get_started/get-started-vs)
-* [vcpkg with Visual Studio Code](https://learn.microsoft.com/vcpkg/get_started/get-started-vscode)
-* [vcpkg with
-  CLion](<https://www.jetbrains.com/help/clion/package-management.html>)
-* [vcpkg with Qt Creator](<https://doc.qt.io/qtcreator/creator-vcpkg.html>)
+Use a fresh service account for the RevPi deployment. Grant only the Pub/Sub permissions required by the enabled bridge directions:
 
-If a library you need is not present in the vcpkg registry, [open an issue on
-the GitHub repository][contributing:submit-issue] or [contribute the package
-yourself](https://learn.microsoft.com/vcpkg/get_started/get-started-adding-to-registry).
+- Telemetry MQTT to Pub/Sub enabled: allow publishing to the telemetry Pub/Sub topic.
+- Command Pub/Sub to MQTT enabled: allow consuming from the command Pub/Sub subscription.
 
-After you've gotten vcpkg installed and working, you may wish to [add
-tab completion to your terminal](https://learn.microsoft.com/vcpkg/commands/integrate#vcpkg-autocompletion).
+Do not commit, print, paste, or bake the service-account JSON into a Docker image.
 
-# Use vcpkg
+## Runtime Configuration
 
-Create a [manifest for your project's dependencies](https://learn.microsoft.com/vcpkg/consume/manifest-mode):
+Create the runtime directory on the RevPi:
 
-```Console
-vcpkg new --application
-vcpkg add port fmt
+```sh
+sudo install -d -m 0750 /etc/amarre-v2
 ```
 
-Or [install packages through the command line](https://learn.microsoft.com/vcpkg/consume/classic-mode):
+Copy and edit the sanitized example:
 
-```Console
-vcpkg install fmt
+```sh
+sudo cp config.debian-arm64.example.json /etc/amarre-v2/config.json
+sudo editor /etc/amarre-v2/config.json
+sudo chmod 0644 /etc/amarre-v2/config.json
 ```
 
-Then use one of our available integrations for
-[CMake](https://learn.microsoft.com/vcpkg/concepts/build-system-integration#cmake-integration),
-[MSBuild](https://learn.microsoft.com/vcpkg/concepts/build-system-integration#msbuild-integration) or 
-[other build
-systems](https://learn.microsoft.com/vcpkg/concepts/build-system-integration#manual-integration).
+Important: `gcp.project_id` must be the textual Google Cloud project ID, not the numeric project number. For example, use a value like `my-project-id`, not a value like `523949360823`. The deployer must supply the correct textual project ID.
 
-For a short description of all available commands, run `vcpkg help`.
-Run `vcpkg help [topic]` for details on a specific topic.
+For the RevPi container deployment, keep:
 
-# Key features
+```json
+"broker": "tcp://127.0.0.1:1883"
+```
 
-vcpkg offers powerful features for your package management needs:
+The Compose file uses `network_mode: host`, so that address reaches Mosquitto on the RevPi host.
 
-* [easily integrate with your build system](https://learn.microsoft.com/vcpkg/concepts/build-system-integration)
-* [control the versions of your dependencies](https://learn.microsoft.com/vcpkg/users/versioning)
-* [package and publish your own packages](https://learn.microsoft.com/vcpkg/concepts/registries)
-* [reuse your binary artifacts](https://learn.microsoft.com/vcpkg/users/binarycaching)
-* [enable offline scenarios with asset caching](https://learn.microsoft.com/vcpkg/concepts/asset-caching)
+## Secrets
 
-# Contribute
+Create the MQTT password environment file on the RevPi:
 
-vcpkg is an open source project, and is thus built with your contributions. Here
-are some ways you can contribute:
+```sh
+sudo cp deploy/revpi/amarre-bridge.env.example /etc/amarre-v2/amarre-bridge.env
+sudo editor /etc/amarre-v2/amarre-bridge.env
+sudo chmod 0600 /etc/amarre-v2/amarre-bridge.env
+```
 
-* [Submit issues][contributing:submit-issue] in vcpkg or existing packages
-* [Submit fixes and new packages][contributing:submit-pr]
+The file must contain:
 
-Please refer to our [mantainer guide](https://learn.microsoft.com/vcpkg/contributing/maintainer-guide) and
-[packaging tutorial](https://learn.microsoft.com/vcpkg/get_started/get-started-packaging) for more details.
+```sh
+MQTT_PASSWORD=the-private-runtime-password
+```
 
-This project has adopted the [Microsoft Open Source Code of
-Conduct][contributing:coc]. For more information see the [Code of Conduct
-FAQ][contributing:coc-faq] or email
-[opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional
-questions or comments.
- 
-[contributing:submit-issue]: https://github.com/microsoft/vcpkg/issues/new/choose
-[contributing:submit-pr]: https://github.com/microsoft/vcpkg/pulls
-[contributing:coc]: https://opensource.microsoft.com/codeofconduct/
-[contributing:coc-faq]: https://opensource.microsoft.com/codeofconduct/
-  
-# Resources
+Never commit the real file.
 
-* Ports: [Microsoft/vcpkg](<https://github.com/microsoft/vcpkg>)
-* Source code: [Microsoft/vcpkg-tool](<https://github.com/microsoft/vcpkg-tool>)
-* Docs: [Microsoft Learn | vcpkg](https://learn.microsoft.com/vcpkg)
-* Website: [vcpkg.io](<https://vcpkg.io>)
-* Email: [vcpkg@microsoft.com](<mailto:vcpkg@microsoft.com>)
-* Discord: [\#include \<C++\>'s Discord server](<https://www.includecpp.org>), in the #🌏vcpkg channel
-* Slack: [C++ Alliance's Slack server](<https://cppalliance.org/slack/>), in the #vcpkg channel
+Place the fresh service-account key on the RevPi:
 
-# License
+```sh
+sudo cp /path/to/fresh-service-account.json /etc/amarre-v2/gcp-service-account.json
+sudo chown 65532:65532 /etc/amarre-v2/gcp-service-account.json
+sudo chmod 0400 /etc/amarre-v2/gcp-service-account.json
+```
 
-The code in this repository is licensed under the MIT License. The libraries
-provided by ports are licensed under the terms of their original authors. Where
-available, vcpkg places the associated license(s) in the location
-[`installed/<triplet>/share/<port>/copyright`](https://learn.microsoft.com/vcpkg/contributing/maintainer-guide#install-copyright-file).
+The container runs as UID/GID `65532`, so the credential file is readable only by that runtime identity. The Compose file mounts it read-only and sets:
 
-# Security
+```sh
+GOOGLE_APPLICATION_CREDENTIALS=/var/run/secrets/gcp-service-account.json
+```
 
-Most ports in vcpkg build the libraries in question using the original build
-system preferred by the original developers of those libraries, and download
-source code and build tools from their official distribution locations. For use
-behind a firewall, the specific access needed will depend on which ports are
-being installed. If you must install it in an "air gapped" environment, consider
-instaling once in a non-"air gapped" environment, populating an [asset
-cache](https://learn.microsoft.com/vcpkg/users/assetcaching) shared with the otherwise "air gapped"
-environment.
+## Build And Start
 
-# Telemetry
+From the repository root on the RevPi:
 
-vcpkg collects usage data in order to help us improve your experience. The data
-collected by Microsoft is anonymous. You can opt-out of telemetry by:
+```sh
+docker compose -f deploy/revpi/docker-compose.yml build
+docker compose -f deploy/revpi/docker-compose.yml up -d
+```
 
-- running the bootstrap-vcpkg script with `-disableMetrics`
-- passing `--disable-metrics` to vcpkg on the command line
-- setting the `VCPKG_DISABLE_METRICS` environment variable
+The image is built for `linux/arm64`, runs as a non-root user, uses a read-only root filesystem, and limits memory to reduce pressure on the RevPi.
 
-Read more about vcpkg telemetry at [https://learn.microsoft.com/vcpkg/about/privacy](https://learn.microsoft.com/vcpkg/about/privacy).
+## Logs And Health Checks
+
+View logs:
+
+```sh
+docker compose -f deploy/revpi/docker-compose.yml logs -f --tail=100
+```
+
+Check container restart state:
+
+```sh
+docker compose -f deploy/revpi/docker-compose.yml ps
+```
+
+Verify Mosquitto separately on the RevPi host:
+
+```sh
+systemctl status mosquitto
+ss -ltnp | grep ':1883'
+```
+
+Because the bridge is an MQTT client, the container exposes no ports.
+
+## Restart And Rollback
+
+Restart after configuration changes:
+
+```sh
+docker compose -f deploy/revpi/docker-compose.yml restart
+```
+
+Rollback to a previous image or commit by checking out the prior revision, rebuilding, and restarting:
+
+```sh
+git checkout <previous-commit>
+docker compose -f deploy/revpi/docker-compose.yml build
+docker compose -f deploy/revpi/docker-compose.yml up -d
+```
+
+## Local Windows Workflow
+
+The existing Windows CMake/vcpkg workflow is intentionally left in place. The Debian deployment uses additional files and runtime environment variables instead of replacing the Windows development path.

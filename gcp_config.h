@@ -20,6 +20,8 @@ private:
     std::string mqtt_broker_;
     std::string mqtt_topic_;
     std::string mqtt_command_topic_;
+    std::string mqtt_username_;
+    std::string mqtt_password_env_ = "MQTT_PASSWORD";
     std::string pubsub_command_subscription_id_;
     int mqtt_qos_ = 1;
     bool use_pubsub_ = true;
@@ -79,6 +81,12 @@ public:
                 if (mqtt_config.contains("command_topic")) {
                     mqtt_command_topic_ = mqtt_config["command_topic"].get<std::string>();
                 }
+                if (mqtt_config.contains("username")) {
+                    mqtt_username_ = mqtt_config["username"].get<std::string>();
+                }
+                if (mqtt_config.contains("password_env")) {
+                    mqtt_password_env_ = mqtt_config["password_env"].get<std::string>();
+                }
             }
 
             std::cout << "[Config] Configuration loaded successfully" << std::endl;
@@ -108,6 +116,9 @@ public:
                     "mqtt", {
                         {"broker", "tcp://localhost:1883"},
                         {"topic", "devices/+/telemetry"},
+                        {"command_topic", "devices/sensor_02/commands"},
+                        {"username", ""},
+                        {"password_env", "MQTT_PASSWORD"},
                         {"qos", 1}
                     }
                 }
@@ -132,6 +143,8 @@ public:
     std::string get_mqtt_topic() const { return mqtt_topic_; }
     std::string get_pubsub_command_subscription_id() const { return pubsub_command_subscription_id_; }
     std::string get_mqtt_command_topic() const { return mqtt_command_topic_; }
+    std::string get_mqtt_username() const { return mqtt_username_; }
+    std::string get_mqtt_password_env() const { return mqtt_password_env_; }
     int get_mqtt_qos() const { return mqtt_qos_; }
     bool get_use_pubsub() const { return use_pubsub_; }
     bool get_use_pubsub_commands() const { return use_pubsub_commands_; }
@@ -155,6 +168,8 @@ public:
         std::cout << "  Use Pub/Sub: " << (use_pubsub_ ? "Yes" : "No") << std::endl;
         std::cout << "  MQTT Broker: " << mqtt_broker_ << std::endl;
         std::cout << "  MQTT Topic: " << mqtt_topic_ << std::endl;
+        std::cout << "  MQTT Username: " << (mqtt_username_.empty() ? "(anonymous)" : mqtt_username_) << std::endl;
+        std::cout << "  MQTT Password Env: " << mqtt_password_env_ << std::endl;
         std::cout << "  MQTT QoS: " << mqtt_qos_ << std::endl;
         std::cout << "  Pub/Sub Command Subscription: " << pubsub_command_subscription_id_ << std::endl;
         std::cout << "  Use Pub/Sub Commands: " << (use_pubsub_commands_ ? "Yes" : "No") << std::endl;
@@ -207,6 +222,11 @@ public:
 
         if (mqtt_qos_ < 0 || mqtt_qos_ > 2) {
             std::cerr << "[Config] MQTT QoS must be 0, 1, or 2" << std::endl;
+            return false;
+        }
+
+        if (!mqtt_username_.empty() && mqtt_password_env_.empty()) {
+            std::cerr << "[Config] MQTT password environment variable name is required when MQTT username is configured" << std::endl;
             return false;
         }
 

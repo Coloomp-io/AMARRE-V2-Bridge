@@ -126,8 +126,20 @@ public:
         auto time = std::chrono::system_clock::to_time_t(now);
         std::tm utc_time{};
         char buf[30];
-        gmtime_s(&utc_time, &time);
-        strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utc_time);
+
+#if defined(_WIN32)
+        if (gmtime_s(&utc_time, &time) != 0) {
+            return "1970-01-01T00:00:00Z";
+        }
+#else
+        if (gmtime_r(&time, &utc_time) == nullptr) {
+            return "1970-01-01T00:00:00Z";
+        }
+#endif
+
+        if (strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utc_time) == 0) {
+            return "1970-01-01T00:00:00Z";
+        }
         return std::string(buf);
     }
 
