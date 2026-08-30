@@ -100,16 +100,62 @@ The container runs as UID/GID `65532`, so the credential file is readable only b
 GOOGLE_APPLICATION_CREDENTIALS=/var/run/secrets/gcp-service-account.json
 ```
 
-## Build And Start
+## Build Image In GitHub Actions
 
-From the repository root on the RevPi:
+Do not build the Docker image on the RevPi. The RevPi Connect SE has limited RAM and no swap, and compiling vcpkg plus Google Cloud C++ can stall the device for hours.
+
+Use the native ARM64 GitHub Actions workflow instead:
+
+1. Open the repository on GitHub.
+2. Go to **Actions**.
+3. Select **Build Debian ARM64 Image**.
+4. Choose **Run workflow** on the `agent/debian-arm64` branch.
+5. Wait for the workflow to finish.
+
+The workflow runs on `ubuntu-24.04-arm`, builds the image for `linux/arm64`, exports it with `docker save`, compresses it, and uploads:
+
+```text
+amarre-v2-bridge-debian-arm64.tar.gz
+```
+
+The workflow does not require MQTT or Google Cloud credentials. Do not add secrets as workflow variables, Docker build arguments, or files in the repository.
+
+## Install Image On The RevPi
+
+Download the `amarre-v2-bridge-debian-arm64-image` artifact from the completed workflow run, then copy the `.tar.gz` file to the RevPi:
 
 ```sh
-docker compose -f deploy/revpi/docker-compose.yml build
+scp amarre-v2-bridge-debian-arm64.tar.gz pi@RevPi163085:/tmp/
+```
+
+Load the image on the RevPi:
+
+```sh
+sudo docker load -i /tmp/amarre-v2-bridge-debian-arm64.tar.gz
+```
+
+Verify the image architecture:
+
+```sh
+sudo docker image inspect amarre-v2-bridge:debian-arm64 \
+  --format '{{.Architecture}}'
+```
+
+The expected output is:
+
+```text
+arm64
+```
+
+## Start On The RevPi
+
+From the repository root on the RevPi, after the runtime configuration and secret files are in place:
+
+```sh
 docker compose -f deploy/revpi/docker-compose.yml up -d
 ```
 
-The image is built for `linux/arm64`, runs as a non-root user, uses a read-only root filesystem, and limits memory to reduce pressure on the RevPi.
+The loaded image runs as a non-root user, uses a read-only root filesystem, and limits memory to reduce pressure on the RevPi.
 
 ## Logs And Health Checks
 
@@ -142,11 +188,10 @@ Restart after configuration changes:
 docker compose -f deploy/revpi/docker-compose.yml restart
 ```
 
-Rollback to a previous image or commit by checking out the prior revision, rebuilding, and restarting:
+Rollback to a previous image by loading a prior GitHub Actions artifact and restarting:
 
 ```sh
-git checkout <previous-commit>
-docker compose -f deploy/revpi/docker-compose.yml build
+sudo docker load -i /path/to/previous-amarre-v2-bridge-debian-arm64.tar.gz
 docker compose -f deploy/revpi/docker-compose.yml up -d
 ```
 
