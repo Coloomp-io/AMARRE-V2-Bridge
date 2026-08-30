@@ -10,8 +10,6 @@
 *.user
 *.userosscache
 *.sln.docstates
-/vcpkg.json
-/vcpkg-configuration.json
 
 # fuzzing
 sync_dir*
@@ -319,9 +317,24 @@ archives
 prefab/
 *.swp
 
+############################################################
+# AMARRE runtime secrets and local deployment state
+############################################################
+
+.env
+*.env
+*.local.json
+config.local.json
+config.runtime.json
+*service-account*.json
+*credentials*.json
+gcp-service-account.json
+service-account.json
+deploy/revpi/secrets/
+deploy/revpi/*.override.yml
+
 ###################
 # Codespaces
 ###################
 pythonenv3.8/
 .venv/
-

@@ -1,0 +1,22 @@
+services:
+  amarre-v2-bridge:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: amarre-v2-bridge:debian-arm64
+    platform: linux/arm64
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    env_file:
+      - ${AMARRE_BRIDGE_ENV_FILE:-/etc/amarre-v2/amarre-bridge.env}
+    environment:
+      AMARRE_CONFIG_FILE: /etc/amarre-v2/config.json
+      GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/gcp-service-account.json
+    volumes:
+      - ${AMARRE_CONFIG_HOST_FILE:-/etc/amarre-v2/config.json}:/etc/amarre-v2/config.json:ro
+      - ${GOOGLE_APPLICATION_CREDENTIALS_HOST_FILE:-/etc/amarre-v2/gcp-service-account.json}:/var/run/secrets/gcp-service-account.json:ro
+    mem_limit: 256m
+    cpus: "1.0"

@@ -1,0 +1,58 @@
+name: Build Debian ARM64 Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/debian-arm64
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "vcpkg.json"
+      - "CMakeLists.txt"
+      - "cmake/triplets/**"
+      - "*.cpp"
+      - "*.h"
+      - "config.debian-arm64.example.json"
+      - "deploy/revpi/**"
+      - ".github/workflows/build-debian-arm64-image.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Linux ARM64 Docker Image
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          load: true
+          push: false
+          tags: amarre-v2-bridge:debian-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Export image artifact
+        run: |
+          docker save amarre-v2-bridge:debian-arm64 | gzip > amarre-v2-bridge-debian-arm64.tar.gz
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: amarre-v2-bridge-debian-arm64-image
+          path: amarre-v2-bridge-debian-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 14

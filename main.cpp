@@ -9,6 +9,8 @@
 #include <queue>
 #include <MQTTAsync.h>
 #include <atomic>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
 #include "pubsub_subscriber.h"
 #include "mqtt_callback.h"
 #include "gcp_config.h"
@@ -71,6 +73,26 @@ std::unique_ptr<PubSubPublisher> g_publisher;
 PublishQueue g_publish_queue;
 volatile std::sig_atomic_t g_shutdown_requested = 0;
 
+std::string get_env_value(const std::string& name) {
+#if defined(_WIN32)
+    char* value = nullptr;
+    size_t value_size = 0;
+    if (_dupenv_s(&value, &value_size, name.c_str()) != 0 || value == nullptr) {
+        return "";
+    }
+
+    std::string result(value);
+    free(value);
+    return result;
+#else
+    const char* value = std::getenv(name.c_str());
+    if (value == nullptr) {
+        return "";
+    }
+    return value;
+#endif
+}
+
 void handle_shutdown_signal(int signal) {
     (void)signal;
     g_shutdown_requested = 1;
@@ -93,8 +115,38 @@ void pubsub_worker() {
     std::cout << "[PubSubWorker] Publisher worker stopped" << std::endl;
 }
 
+std::string get_command_topic_from_payload(const std::string& payload) {
+    try {
+        auto command = nlohmann::json::parse(payload);
+
+        if (command.contains("device") && command["device"].is_string()) {
+            auto device_id = command["device"].get<std::string>();
+            if (!device_id.empty()) {
+                return "devices/" + device_id + "/commands";
+            }
+        }
+
+        if (command.contains("device_id") && command["device_id"].is_string()) {
+            auto device_id = command["device_id"].get<std::string>();
+            if (!device_id.empty()) {
+                return "devices/" + device_id + "/commands";
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[PubSubCommands] Command payload is not JSON: "
+                  << e.what() << std::endl;
+    }
+
+    std::cout << "[PubSubCommands] Falling back to configured MQTT command topic: "
+              << g_config.get_mqtt_command_topic() << std::endl;
+    return g_config.get_mqtt_command_topic();
+}
+
 bool publish_command_to_mqtt(MqttContext& ctx, const std::string& payload) {
-    return publish_mqtt_message(ctx, g_config.get_mqtt_command_topic(), payload, g_config.get_mqtt_qos());
+    auto command_topic = get_command_topic_from_payload(payload);
+    std::cout << "[PubSubCommands] Publishing command to MQTT topic: "
+              << command_topic << std::endl;
+    return publish_mqtt_message(ctx, command_topic, payload, g_config.get_mqtt_qos());
 };
 
 /**
@@ -120,10 +172,12 @@ int main() {
         std::signal(SIGTERM, handle_shutdown_signal);
 
         // Step 1: Load configuration
+        const auto config_path_env = get_env_value("AMARRE_CONFIG_FILE");
+        const std::string config_path = config_path_env.empty() ? "config.json" : config_path_env;
         std::cout << "\n[INIT] Loading configuration..." << std::endl;
-        if (!g_config.load_from_file("config.json")) {
+        if (!g_config.load_from_file(config_path)) {
             std::cerr << "[ERROR] Failed to load configuration. Creating default config..." << std::endl;
-            GcpConfig::create_default_config("config.json");
+            GcpConfig::create_default_config(config_path);
             std::cout << "[ERROR] Please edit config.json with your GCP credentials and restart" << std::endl;
             return 1;
         }
@@ -180,6 +234,24 @@ int main() {
         conn_opts.context = &ctx;
         conn_opts.onSuccess = on_connect_success;
         conn_opts.onFailure = on_connect_failure;
+
+        const std::string mqtt_username = g_config.get_mqtt_username();
+        const std::string mqtt_password_env = g_config.get_mqtt_password_env();
+        const std::string mqtt_password = mqtt_username.empty() ? "" : get_env_value(mqtt_password_env);
+        if (!mqtt_username.empty()) {
+            if (mqtt_password.empty()) {
+                std::cerr << "[ERROR] MQTT username is configured, but environment variable "
+                          << mqtt_password_env << " is not set or is empty" << std::endl;
+                MQTTAsync_destroy(&ctx.client);
+                return 1;
+            }
+            conn_opts.username = mqtt_username.c_str();
+            conn_opts.password = mqtt_password.c_str();
+            std::cout << "[INIT] MQTT authentication enabled for user: "
+                      << mqtt_username << std::endl;
+        } else {
+            std::cout << "[INIT] MQTT authentication disabled" << std::endl;
+        }
 
         // Step 7: Establish connection
         std::cout << "[INIT] Connecting to MQTT broker at: " << broker << std::endl;
